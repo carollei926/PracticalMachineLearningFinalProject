@@ -1,0 +1,147 @@
+---
+title: "MachineLearning Final Project"
+author: "Pei-Pei Lei"
+date: "July 21, 2017"
+output: html_document
+---
+## Practical Machine Learning Final Project
+
+### Data info:
+### http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises
+
+### Training dataset URL:
+### https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+### Test dataset URL:
+### https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+### (Citation) Data source:
+### http://groupware.les.inf.puc-rio.br/har.
+
+
+### Read in testing dataset
+```{r}
+path <- 'C:/Users/leip/Desktop/datasciencecoursera/8. Machine Learning/FinalProject'
+pml_training <- read.csv(paste(path,'pml-training.csv', sep = "/"))
+pml_testing  <- read.csv(paste(path,'pml-testing.csv', sep = "/"))
+```
+
+### load library and set seed
+```{r}
+set.seed(3568)
+library(caret)
+library(parallel)
+library(doParallel)
+```
+
+### 1. DATA CLEANING AND PREPARATION
+First, take a look at the data (I'm not showing output here because the output is too long).
+```{r eval=FALSE}
+summary(pml_training)
+str(pml_training)
+```
+Based on the output from codes above, first 7 vars can be removed- they are id, name, and timestamps.
+
+Also, there are many columns with too many missing cases that should be removed. First we remove the cases with over 10000 missing values:
+```{r}
+na_count <- sapply(pml_training, function(x) sum(length(which(is.na(x))))) > 10000
+# transpose logical na_count
+na_count_trans <- t(na_count)
+colkeep <- colnames(na_count_trans)[apply(na_count_trans, 1, function(y) y==FALSE)]
+```
+
+Then we remove the first 7 variables:
+```{r}
+# remove the first 5 vars that are not helpful for predicting
+colkeep <- colkeep[8: 93]
+pml_training2 <- subset(pml_training, select = colkeep)
+```
+Now we take a look at the data after initial cleaning:
+```{r}
+    dim(pml_training)
+    #str(pml_training2)
+    #summary(pml_training2)
+```
+
+There are still some variables that have a lot of blank value- we'll remove them next:
+```{r}
+nzv <- nearZeroVar(pml_training2)
+pml_training3 <- pml_training2[ , -nzv]
+    dim(pml_training3)
+    #str(pml_training3)
+    #summary(pml_training3)
+    #head(pml_training3)
+    #tail(pml_training3)
+```
+The data set looks good now, and is ready for fitting
+
+### Create training and testing set from cleaned training set
+```{r}
+inTrain <- createDataPartition(y=pml_training3$classe, p=0.7, list=FALSE)
+training <- pml_training3[inTrain,]
+testing <- pml_training3[-inTrain,]
+    dim(training)
+    dim(testing)
+```
+
+### 2. MODEL SELECTION
+Based on the description of this project, we need to have very high accuracy rate. Therefore Random Forests is a good choice for it's accuracy. The drawback is its running speed. Parallel processing in carat package is a workaround for the speed issue. Note: the parallel processing codes I included in this project are based on the TA content on GitHub here:
+https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md
+
+Cross validation is used to estimate the out of sample error in the model. A function to run Cross Validation is *rfcv* function, but it takes a long time to run.  The *train* function in Caret package takes care of cross validation by doing bootstrap validation in a shorter time. So in the codes below we do a 10-fold cross validation in the *train* function. 
+
+### a. Configure parallel processing
+Set up training run for x/y syntax
+```{r}
+x <- training[,-53]
+y <- training[, 53]
+```
+
+Convention to leave 1 core for OS
+```{r}
+cluster <- makeCluster(detectCores() -1)  
+registerDoParallel(cluster)
+```
+
+### b. Configure trainControl object (this is where we specify the Cross Validation settings and allow parallel processing)
+```{r}
+fitControl <- trainControl(method = "cv",
+                           number = 10,
+                           allowParallel = TRUE)
+```
+
+### c. Develop Training Model
+```{r}
+fit <- train(x, y, method = "rf", data= training, trControl = fitControl)
+```
+
+
+### d. De-register parallel processing cluster
+```{r}
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+### Model fitting results
+```{r}
+fit
+```
+
+The accuracy selected is 99%.
+
+### test the fitted model in testing set
+```{r}
+pred <- predict(fit, testing)
+testing$predRight <- pred == testing$classe
+table(pred,testing$classe)
+```
+The testing result is not 100% correct, but pretty good overall.
+
+
+### Applying the selected model to test data
+```{r}
+predict_pml_testing <- predict(fit, pml_testing)
+predict_pml_testing
+```
+
+I entered the predicted classe value to week4 quiz and have them all correct.
